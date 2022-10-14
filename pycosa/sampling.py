@@ -487,7 +487,7 @@ class CoverageSampler(SingleSampler):
         constraints = []
         solutions = []
         for interaction in itertools.combinations(optionals, t):
-            for max_enabled in range(n_options - len(optionals), n_options):
+            for max_enabled in range(n_options - len(optionals) + 1, n_options):
                 logging.debug(
                     f"For interaction {interaction} search configuration with {max_enabled} enabled options."
                 )
@@ -521,7 +521,6 @@ class CoverageSampler(SingleSampler):
                     )
                     == max_enabled
                 )
-
                 if solver.check() == z3.sat:
                     solution = solver.model()[target]
                     constraints.append(solution != target)

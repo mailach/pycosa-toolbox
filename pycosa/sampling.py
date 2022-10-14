@@ -1,6 +1,7 @@
 import itertools
 from abc import ABC, abstractmethod
 from typing import Sequence
+import logging
 
 import numpy as np
 import pandas as pd
@@ -486,45 +487,46 @@ class CoverageSampler(SingleSampler):
         constraints = []
         solutions = []
         for interaction in itertools.combinations(optionals, t):
+            for max_enabled in range(n_options - len(optionals), n_options):
+                logging.debug(
+                    f"For interaction {interaction} search configuration with {max_enabled} enabled options."
+                )
+                # initialize a new optimizer
+                solver = z3.Solver()
 
-            # initialize a new optimizer
-            optimizer = z3.Optimize()
+                # add feature model clauses
+                solver.add(self.fm.bitvec_constraints)
 
-            # add feature model clauses
-            optimizer.add(self.fm.bitvec_constraints)
+                # add side constraints
+                solver.add(self.side_constraints)
 
-            # add side constraints
-            optimizer.add(self.side_constraints)
+                # add previous solutions as constraints
+                for solution in solutions:
+                    solver.add(solution != target)
 
-            # add previous solutions as constraints
-            for solution in solutions:
-                optimizer.add(solution != target)
+                for opt in interaction:
+                    if not negwise:
+                        constraint = z3.Extract(opt, opt, target) == 1
+                    else:
+                        constraint = z3.Extract(opt, opt, target) == 0
 
-            for opt in interaction:
-                if not negwise:
-                    constraint = z3.Extract(opt, opt, target) == 1
-                else:
-                    constraint = z3.Extract(opt, opt, target) == 0
+                    solver.add(constraint)
 
-                optimizer.add(constraint)
+                solver.add(
+                    z3.Sum(
+                        [
+                            z3.ZeroExt(n_options + 1, z3.Extract(i, i, target))
+                            for i in range(n_options)
+                        ]
+                    )
+                    == max_enabled
+                )
 
-            # function that counts the number of enabled features
-            func = z3.Sum(
-                [
-                    z3.ZeroExt(n_options, z3.Extract(i, i, target))
-                    for i in range(n_options)
-                ]
-            )
-
-            if not negwise:
-                optimizer.minimize(func)
-            else:
-                optimizer.maximize(func)
-
-            if optimizer.check() == z3.sat:
-                solution = optimizer.model()[target]
-                constraints.append(solution != target)
-                solutions.append(solution)
+                if solver.check() == z3.sat:
+                    solution = solver.model()[target]
+                    constraints.append(solution != target)
+                    solutions.append(solution)
+                    break
 
         sample = self._solutions_to_dataframe(solutions)
         return sample
